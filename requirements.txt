@@ -1,0 +1,18 @@
+# ---- 运行依赖 ----------------------------------------------------------
+PySide6==6.12.0
+
+# ---- 打包依赖（仅在重新生成 exe / 安装包时需要）------------------------
+# pyinstaller==6.22.3
+
+# ---- 说明 --------------------------------------------------------------
+# Python 3.10+（开发环境为 3.13）
+#
+# 安装：
+#   python -m venv .venv
+#   .venv\Scripts\python.exe -m pip install -r requirements.txt
+#
+# 打包 exe：
+#   .venv\Scripts\python.exe -m PyInstaller build.spec --noconfirm
+#
+# 生成图标（可选，仓库已含 app.ico）：
+#   .venv\Scripts\python.exe make_icon.py

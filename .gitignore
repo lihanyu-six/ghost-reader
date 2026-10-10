@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# PyInstaller 构建产物
+build/
+buildv*/
+dist/
+dist_*/
+installer_out/
+*.manifest
+
+# 采集/调试用的临时脚本与截图（不进仓库）
+_fetch/
+shots/
+shots2/
+testdata/
+_*.py
+_*.log
+_*.png
+
+# 依赖锁与缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+desktop.ini
