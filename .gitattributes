@@ -1,0 +1,16 @@
+# 统一换行：仓库内存 LF，签出时按平台处理
+* text=auto eol=lf
+
+# 二进制文件，不得做换行转换
+*.ico  binary
+*.png  binary
+*.jpg  binary
+*.exe  binary
+*.zip  binary
+
+# 明确类型，便于 GitHub 识别与 diff
+*.py    text
+*.md    text
+*.iss   text
+*.spec  text
+*.isl   text

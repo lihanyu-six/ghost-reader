@@ -7,14 +7,27 @@
 
 ## 快速上手
 
-**方式一：安装包**（推荐）
+**下载**（约 48 MB，Windows 10 / 11 64 位，无需安装 Python）
 
-双击 `幽灵阅读器_Setup_v1.0.0.exe` → 下一步 → 完成。
-自动创建开始菜单和桌面快捷方式，卸载走「设置 → 应用」。
+👉 [**点此下载最新安装包**](https://github.com/lihanyu-six/ghost-reader/releases/latest)
 
-**方式二：绿色版**
+**方式一：安装版**（推荐）
 
-直接双击 `幽灵阅读器.exe` 即可运行，无需安装任何环境。
+双击下载的 `GhostReader-Setup-x.y.z.exe` → 下一步 → 完成。
+自动创建开始菜单和桌面快捷方式，**无需管理员权限**，卸载走「设置 → 应用」。
+
+**方式二：绿色单文件版**
+
+仓库不含 exe 二进制（体积原因），自行打包即可得到免安装的单文件 exe：
+
+```bash
+pip install -r requirements.txt pyinstaller
+python -m PyInstaller build.spec --noconfirm
+```
+
+产物在 `dist/幽灵阅读器.exe`，拷到任意位置双击就能跑，无需任何运行库。
+
+---
 
 首次启动会弹出欢迎页 → 点「打开一本书」选择你的 EPUB 或 TXT 文件，
 或者点「📚 本地书库」「✨ 发现好书」探索。
