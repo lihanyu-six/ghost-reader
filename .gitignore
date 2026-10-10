@@ -3,15 +3,19 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+.venv38/
 venv/
 env/
 
 # PyInstaller 构建产物
 build/
 buildv*/
+build_w7*/
 dist/
 dist_*/
+dist_w7*/
 installer_out/
+win7_build/
 *.manifest
 
 # 采集/调试用的临时脚本与截图（不进仓库）

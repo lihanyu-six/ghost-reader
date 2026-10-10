@@ -54,16 +54,7 @@ class GlobalHotkey(QObject):
         if self._filter is not None or not IS_WIN:
             return
 
-        outer = self
-
-        class _Filter(QObject):
-            def eventFilter(self, obj, event):  # noqa: N802
-                et = event.type()
-                if et == QEvent.Type.NativeEvent if hasattr(QEvent, "Type") else False:
-                    pass
-                return False
-
-        # 直接使用原生事件过滤器（PySide6 提供 QAbstractNativeEventFilter）
+        # 原生事件过滤器（PySide2/PySide6 均提供 QAbstractNativeEventFilter）
         from PySide6.QtCore import QAbstractNativeEventFilter
 
         class _NativeFilter(QAbstractNativeEventFilter):

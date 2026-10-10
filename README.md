@@ -7,13 +7,25 @@
 
 ## 快速上手
 
-**下载**（约 48 MB，Windows 10 / 11 64 位，无需安装 Python）
+**下载**（Windows 64 位，无需安装 Python）
 
 👉 [**点此下载最新安装包**](https://github.com/lihanyu-six/ghost-reader/releases/latest)
 
+| 你的系统 | 下载文件 | 底层技术 |
+|---|---|---|
+| **Windows 10 / 11** | `GhostReader-Setup-v1.0.0.exe`（约 48 MB） | Python 3.13 + PySide6 (Qt 6) |
+| **Windows 7 SP1 / 8 / 8.1** | `GhostReader-Setup-Win7-v1.0.1.exe`（约 48 MB） | Python 3.8 + PySide2 (Qt 5.15) |
+
+两个版本**功能完全一致**，只是底层依赖不同。Win10/11 用户建议装普通版（体积更小、渲染更现代）。
+
+> **Win7 用户注意**：如果启动时报「缺少 `api-ms-win-*.dll`」或「0xc000007b」，
+> 说明系统缺少 VC++ 运行库，装一下微软官方的
+> [vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe) 即可。
+> 详见安装目录里的 `Win7-说明.txt`。
+
 **方式一：安装版**（推荐）
 
-双击下载的 `GhostReader-Setup-x.y.z.exe` → 下一步 → 完成。
+双击下载的安装包 → 下一步 → 完成。
 自动创建开始菜单和桌面快捷方式，**无需管理员权限**，卸载走「设置 → 应用」。
 
 **方式二：绿色单文件版**
@@ -208,8 +220,11 @@ python -m PyInstaller build.spec --noconfirm
 | `booklist.py` | 内置精选书单数据（52 本已完结作品） |
 | `window_utils.py` | 无边框窗口、全局热键、投屏检测 |
 | `config.py` | 配置持久化、主题定义 |
-| `build.spec` | PyInstaller 打包配置 |
-| `installer.iss` | Inno Setup 安装包脚本 |
+| `build.spec` | PyInstaller 打包配置（Win10/11 版，PySide6） |
+| `build_win7.spec` | PyInstaller 打包配置（Win7 版，PySide2） |
+| `to_pyside2.py` | PySide6 → PySide2 源码转换器（构建 Win7 版用） |
+| `installer.iss` | Inno Setup 安装包脚本（Win10/11 版） |
+| `installer_win7.iss` | Inno Setup 安装包脚本（Win7 版） |
 | `make_icon.py` | 生成 `app.ico`（Qt 绘制，无外部依赖） |
 | `ChineseSimplified.isl` | Inno Setup 简体中文语言包（构建用） |
 
@@ -240,6 +255,43 @@ python -m PyInstaller build.spec --noconfirm
 
 产物在 `installer_out/` 下。
 
+### 如何构建 Windows 7 兼容版
+
+源码统一用 PySide6 写法（主分支只维护这一套）。Win7 版通过**自动转换**产出：
+
+```bash
+# 1. 准备 Python 3.8 环境（最后一个支持 Win7 的 Python 版本）
+uv python install 3.8
+uv venv --python 3.8 .venv38
+
+# 2. 装 Win7 可用的依赖
+#    PySide2 5.15.2.1   —— 最后支持 Win7 的 Qt
+#    PyInstaller 5.13.2 —— 最后支持 Python 3.8 的版本
+.venv38\Scripts\pip install PySide2==5.15.2.1 pyinstaller==5.13.2
+
+# 3. 生成 PySide2 版源码到 win7_build/
+.venv38\Scripts\python.exe to_pyside2.py
+
+# 4. 打包
+.venv38\Scripts\python.exe -m PyInstaller build_win7.spec --noconfirm
+
+# 5. 做安装包
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer_win7.iss
+```
+
+`to_pyside2.py` 会做三类修改，并在结尾**静态扫描残留的 Qt6-only API**：
+
+| 类别 | 例子 |
+|---|---|
+| 导入替换 | `from PySide6.QtCore import ...` → `PySide2` |
+| 类模块归属 | `QShortcut` / `QAction`：QtGui → QtWidgets |
+| API 差异 | `.exec()`→`.exec_()`；`.position().toPoint()`→`.pos()`；`.setFamilies()`→`.setFamily()` |
+
+> 注意：PySide2 5.15 **支持**类级枚举（`Qt.WindowType.Window`），
+> 所以枚举**不需要**剥离。但 `.position()` 这类 Qt6 新增的坐标 API
+> 在 Qt5 里**不存在**（Qt5 只有 `.pos()`），漏改会导致运行时报
+> `AttributeError` 且鼠标交互静默失效——这正是本项目踩过的坑。
+
 **重新生成图标**（仓库里已有 `app.ico`，通常不需要）：
 
 ```bash
@@ -266,11 +318,12 @@ python -m PyInstaller build.spec --noconfirm
 
 | 组件 | 许可 | 说明 |
 |---|---|---|
-| [PySide6](https://www.qt.io/) (Qt for Python) | LGPL-3.0 | GUI 框架。以**动态链接**方式使用，未修改其源码 |
+| [PySide6](https://www.qt.io/) (Qt for Python) | LGPL-3.0 | GUI 框架（Win10/11 版）。以**动态链接**方式使用，未修改其源码 |
+| [PySide2](https://www.qt.io/) (Qt for Python) | LGPL-3.0 | GUI 框架（Win7 版）。同上，动态链接、未修改源码 |
 | Python 标准库 | PSF-2.0 | 无额外限制 |
 
 完整声明见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。
-PySide6 采用 LGPL-3.0：你可以在 `THIRD_PARTY_LICENSES.md` 中找到许可全文链接，
+PySide6 / PySide2 均采用 LGPL-3.0：你可以在 `THIRD_PARTY_LICENSES.md` 中找到许可全文链接，
 并可自行从 PyPI 获取对应版本的原始库文件进行替换。
 
 ### 本项目
