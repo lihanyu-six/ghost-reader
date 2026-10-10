@@ -1,4 +1,4 @@
-; ============================================================================
+﻿; ============================================================================
 ;  幽灵阅读器 (Ghost Reader) —— Inno Setup 6 安装包脚本
 ;
 ;  编译:  ISCC.exe installer.iss
@@ -28,7 +28,7 @@ DisableDirPage=auto
 AllowNoIcons=yes
 LicenseFile=LICENSE_CN.txt
 OutputDir=installer_out
-OutputBaseFilename=幽灵阅读器_Setup_v{#MyAppVersion}
+OutputBaseFilename=GhostReader-Setup-v{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
