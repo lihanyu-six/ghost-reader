@@ -107,6 +107,112 @@ HOTKEY_PRESETS = [
 ]
 
 
+# ------------------------------------------------------------- 任务栏按钮控制
+
+# ITaskbarList 的 CLSID / IID（shell 提供的任务栏操作接口）
+_CLSID_TASKBAR = "{56FDF344-FD6D-11D0-958A-006097C9A090}"
+_IID_TASKBAR = "{56FDF342-FD6D-11D0-958A-006097C9A090}"
+
+_taskbar_ptr = None      # 缓存的 ITaskbarList 指针
+_taskbar_ready = False   # HrInit 是否已调用
+
+
+def _guid(text: str):
+    """'{XXXX-...}' -> GUID 结构体（ctypes）。"""
+    import uuid
+
+    class _GUID(ctypes.Structure):
+        _fields_ = [("Data1", ctypes.c_ulong),
+                    ("Data2", ctypes.c_ushort),
+                    ("Data3", ctypes.c_ushort),
+                    ("Data4", ctypes.c_ubyte * 8)]
+
+    u = uuid.UUID(text)
+    return _GUID(u.time_low, u.time_mid, u.time_hi_version,
+                 (ctypes.c_ubyte * 8)(*u.bytes[8:]))
+
+
+def _taskbar_tab(hwnd: int, add: bool) -> bool:
+    """用 ITaskbarList::AddTab / DeleteTab 精确增删任务栏按钮。
+
+    Qt 的 hide() 只做 ShowWindow(SW_HIDE)，**不会移除任务栏按钮**。
+    残留的按钮被点击时 Windows 会把窗口重新显示出来，用户看到的就是
+    「点了不消失，要点好几下」。直接用 shell 接口把按钮摘掉最干净。
+    成功返回 True，任何失败都返回 False 让调用方走兜底。
+    """
+    global _taskbar_ptr, _taskbar_ready
+    if not IS_WIN or not hwnd:
+        return False
+    try:
+        if _taskbar_ptr is None:
+            clsid, iid = _guid(_CLSID_TASKBAR), _guid(_IID_TASKBAR)
+            p = ctypes.c_void_p()
+            # CLSCTX_INPROC_SERVER = 1
+            hr = ctypes.windll.ole32.CoCreateInstance(
+                ctypes.byref(clsid), None, 1, ctypes.byref(iid), ctypes.byref(p))
+            if hr != 0 or not p:
+                return False
+            _taskbar_ptr = p
+
+        # vtable 布局：
+        #   0 QueryInterface  1 AddRef  2 Release  3 HrInit
+        #   4 AddTab          5 DeleteTab  6 ActivateTab  7 SetActiveAlt
+        vt = ctypes.cast(_taskbar_ptr,
+                         ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p)))[0]
+        fn_one = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p)
+        fn_two = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p)
+
+        if not _taskbar_ready:
+            fn_one(vt[3])(_taskbar_ptr)          # HrInit
+            _taskbar_ready = True
+
+        fn = fn_two(vt[4] if add else vt[5])
+        return fn(_taskbar_ptr, ctypes.c_void_p(hwnd)) == 0     # S_OK
+    except Exception:
+        return False
+
+
+def set_taskbar_visible(widget, visible: bool) -> None:
+    """让窗口的任务栏按钮出现 / 消失。
+
+    两套手段一起上，任何一套生效就够：
+      1. ITaskbarList::AddTab / DeleteTab —— shell 官方接口，精确无闪烁
+      2. WS_EX_TOOLWINDOW 扩展样式位 —— 兜底，几乎不可能失败
+
+    为什么必须做这件事：Qt 的 hide() 只调 ShowWindow(SW_HIDE)，
+    Windows **不会**因此移除任务栏按钮。残留按钮被点一下，系统就会把
+    窗口重新显示出来 —— 用户看到的就是「点了不消失、要点好几下」。
+    """
+    if not IS_WIN:
+        return
+    try:
+        hwnd = int(widget.winId())
+    except Exception:
+        return
+    if not hwnd:
+        return
+
+    _taskbar_tab(hwnd, add=visible)
+
+    # ---- 样式位兜底（同时对某些 shell 版本更可靠）----
+    try:
+        GWL_EXSTYLE = -20
+        WS_EX_TOOLWINDOW = 0x00000080
+        WS_EX_APPWINDOW = 0x00040000
+        u = ctypes.windll.user32
+        getlong = getattr(u, "GetWindowLongPtrW", None) or u.GetWindowLongW
+        setlong = getattr(u, "SetWindowLongPtrW", None) or u.SetWindowLongW
+        ex = getlong(ctypes.c_void_p(hwnd), GWL_EXSTYLE)
+        if visible:
+            new = (ex & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
+        else:
+            new = (ex | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
+        if new != ex:
+            setlong(ctypes.c_void_p(hwnd), GWL_EXSTYLE, new)
+    except Exception:
+        pass
+
+
 # ------------------------------------------------------------- 投屏检测
 
 def detect_capture() -> bool:

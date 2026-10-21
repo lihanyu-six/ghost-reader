@@ -9,10 +9,10 @@
 
 #define MyAppName        "幽灵阅读器"
 #define MyAppNameEn      "Ghost Reader"
-#define MyAppVersion     "1.0.0"
+#define MyAppVersion     "1.0.2"
 #define MyAppPublisher   "Li Hanyu"
 #define MyAppExeName     "幽灵阅读器.exe"
-#define MyAppSrcDir      "dist_app"
+#define MyAppSrcDir      "dist_fix"
 
 [Setup]
 AppId={{7E4C2A91-3F5B-4D8E-9A21-6B0C8D7E4F13}

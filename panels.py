@@ -91,21 +91,26 @@ class TocPanel(QWidget):
     def set_chapters(self, titles):
         self._titles = list(titles)
         self._count = len(titles)
-        self._rebuild(titles)
+        self._rebuild(list(enumerate(self._titles)))
 
-    def _rebuild(self, titles):
+    def _rebuild(self, items):
+        """items 是 [(原章节索引, 标题)]。
+
+        注意：UserRole 必须存**原章节索引**，不能存列表行号。
+        筛选后行号会变，若存行号则点第 3 行会跳到原书第 3 章 —— 章节对不上。
+        """
         self.list.clear()
-        for i, t in enumerate(titles):
+        for idx, t in items:
             it = QListWidgetItem(t)
-            it.setData(Qt.ItemDataRole.UserRole, i)
+            it.setData(Qt.ItemDataRole.UserRole, idx)
             self.list.addItem(it)
 
     def _apply_filter(self, kw):
         kw = kw.strip()
         if not kw:
-            self._rebuild(self._titles)
+            self._rebuild(list(enumerate(self._titles)))
             return
-        self._rebuild([t for t in self._titles if kw in t])
+        self._rebuild([(i, t) for i, t in enumerate(self._titles) if kw in t])
 
     def _on_click(self, item):
         self.chapter_picked.emit(item.data(Qt.ItemDataRole.UserRole))

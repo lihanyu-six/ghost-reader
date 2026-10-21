@@ -24,7 +24,8 @@ from panels import (TocPanel, SearchPanel, SettingsPanel, IconButton,
                     DiscoverPanel, LibraryPanel)
 import booklist as BL
 from window_utils import (FramelessWindow, GlobalHotkey, HOTKEY_PRESETS, VK,
-                          detect_capture, MOD_CONTROL, MOD_SHIFT, MOD_ALT)
+                          detect_capture, set_taskbar_visible,
+                          MOD_CONTROL, MOD_SHIFT, MOD_ALT)
 import webbrowser
 
 APP_NAME = "幽灵阅读器"
@@ -87,6 +88,8 @@ class GhostReader(FramelessWindow):
         self.book = None
         self.chapter_index = 0
         self._rendered: list = []           # 已渲染到正文框的章节序号
+        self._ch_pos: list = []             # [(文档位置, 章节序号)]，用于滚动定位
+        self._appending = False             # 正在追加下一章（防重入）
         self._autoscroll = False
         self._autoscroll_speed = 1
         self._sidebar_open = False
@@ -506,7 +509,7 @@ class GhostReader(FramelessWindow):
         sc("Ctrl+0", lambda: self._set_font_size(17))
         sc("Ctrl+G", self.goto_dialog)
         sc("Ctrl+W", self.toggle_hide)
-        sc("Esc", self.toggle_hide)
+        # Esc 不挂 QShortcut：焦点在输入框/正文时会漏，改在 eventFilter 里拦
         sc("Right", self.next_chapter)
         sc("Left", self.prev_chapter)
         sc("PgDown", self.next_chapter)
@@ -689,13 +692,104 @@ class GhostReader(FramelessWindow):
                 break
 
         html = ("<div style='margin:0;padding:0;'>" + "".join(parts) + "</div>")
+        self._ch_pos = []                  # 旧索引先作废，等布局完再重建
         self.view.setHtml(html)
         self.chapter_index = index
         if not keep_scroll:
             self.view.verticalScrollBar().setValue(0)
+        # 文档布局是延迟的，等一帧再建章节位置索引，否则 find 会落空
+        QTimer.singleShot(0, self._index_chapters)
         self._update_status()
         if keyword:
             QTimer.singleShot(30, lambda: self._highlight_first(keyword))
+
+    # ----------------------------------------------------- 章节位置索引
+
+    def _index_chapters(self):
+        """记录每个已渲染章节标题在文档里的字符位置。
+
+        有了这张表，才能从滚动位置反推「用户现在看到的是第几章」，
+        状态栏、目录高亮、阅读进度、以及「滚动到底续章」都依赖它。
+        """
+        self._ch_pos = []
+        if not self.book or not self._rendered:
+            return
+        doc = self.view.document()
+        pos = 0
+        for idx in self._rendered:
+            title = self.book.chapter_title(idx)
+            if not title:
+                continue
+            cur = doc.find(title, pos)
+            if cur.isNull():
+                continue
+            start = cur.selectionStart()
+            self._ch_pos.append((start, idx))
+            pos = start + 1
+
+    def _chapter_at_viewport(self) -> int:
+        """视口顶部对应的章节序号。"""
+        if not self._ch_pos:
+            return self.chapter_index
+        try:
+            cur = self.view.cursorForPosition(QPoint(4, 4))
+            top = cur.position()
+        except Exception:
+            return self.chapter_index
+        cur_idx = self._ch_pos[0][1]
+        for start, idx in self._ch_pos:
+            if start <= top:
+                cur_idx = idx
+            else:
+                break
+        return cur_idx
+
+    # ----------------------------------------------------- 滚动续章
+
+    def _maybe_append(self):
+        """滚到已渲染内容末尾时，把下一章追加到文档尾部。
+
+        用 insertHtml 追加而不是重绘整个文档：内容接在下面，
+        滚动位置不动，读感是连续的，不会闪一下跳回顶部。
+        """
+        if self._appending or not self.book or not self._rendered:
+            return
+        if self._rendered[-1] + 1 >= self.book.chapter_count:
+            return
+        sb = self.view.verticalScrollBar()
+        if sb.maximum() <= 0 or sb.value() < sb.maximum() - 4:
+            return
+        self._appending = True
+        QTimer.singleShot(0, self._append_chapters)
+
+    def _append_chapters(self, count: int = 3):
+        self._appending = False
+        if not self.book or not self._rendered:
+            return
+        nxt = self._rendered[-1] + 1
+        if nxt >= self.book.chapter_count:
+            return
+        css = getattr(self, "_render_css", None) or self._render_css_default()
+        parts = []
+        added = 0
+        while nxt < self.book.chapter_count and added < count:
+            parts.append(self._html_chapter(
+                self.book.chapter_title(nxt),
+                self.book.chapter_paragraphs(nxt), css, nxt))
+            self._rendered.append(nxt)
+            nxt += 1
+            added += 1
+        if not parts:
+            return
+        cur = QTextCursor(self.view.document())
+        cur.movePosition(QTextCursor.MoveOperation.End)
+        # 必须先断开一个段落再插入：QTextCursor 位于既有段落末尾时，
+        # insertHtml 会把块级元素当内联降级处理 —— 表现为下一章标题
+        # 被塞到上一章最后一段的屁股后面。
+        cur.insertBlock()
+        cur.insertHtml("".join(parts))
+        self._index_chapters()
+        self._update_status()
 
     def _html_chapter(self, title: str, paras: list, css: dict, idx: int) -> str:
         tsize = int(css["size"] * 1.34)
@@ -866,7 +960,15 @@ class GhostReader(FramelessWindow):
         self.search_panel.show_results(hits, keyword)
 
     def _on_scroll(self, _v):
+        # 视口顶部落在哪一章，当前章节就是哪一章。
+        # 这样状态栏、目录高亮、阅读进度都和眼睛看到的内容一致。
+        idx = self._chapter_at_viewport()
+        if idx != self.chapter_index:
+            self.chapter_index = idx
+            self._update_status()
         self._save_progress()
+        # 滑到底自动接下一章
+        self._maybe_append()
 
     def _save_progress(self):
         now = time.time()
@@ -986,11 +1088,13 @@ class GhostReader(FramelessWindow):
             self.btn_auto.setToolTip("自动滚动")
 
     def _tick_autoscroll(self):
+        if not self.book:
+            return
         sb = self.view.verticalScrollBar()
-        if sb.value() >= sb.maximum() - 1 and self.book:
-            if self.chapter_index + 1 < self.book.chapter_count:
-                self.goto_chapter(self.chapter_index + 1)
-        sb.setValue(sb.value() + self._autoscroll_speed)
+        if sb.value() >= sb.maximum() - 1:
+            self._maybe_append()          # 到末尾就顺着续下一章，不重绘
+        if sb.value() < sb.maximum():
+            sb.setValue(sb.value() + self._autoscroll_speed)
 
     def toggle_mini(self, on: bool):
         on = bool(on)
@@ -1018,10 +1122,17 @@ class GhostReader(FramelessWindow):
     # ===================================================== 隐身
 
     def toggle_hide(self):
-        if self._hidden or not self.isVisible():
-            self.show_window()
-        else:
+        """一键隐藏 / 恢复。
+
+        判据只看真实可见性，不看 _hidden 标志。
+        原因：任务栏按钮被点过、被投屏守卫 hide 过、被系统还原过，
+        都会让 _hidden 和实际状态失步 —— 那时按 Esc 会走反分支，
+        表现就是「按了没反应 / 要点好几次」。
+        """
+        if self.isVisible() and not self.isMinimized():
             self.hide_window()
+        else:
+            self.show_window()
 
     def hide_window(self):
         self._hidden = True
@@ -1032,17 +1143,33 @@ class GhostReader(FramelessWindow):
         self.cfg.set("x", self.x())
         self.cfg.set("y", self.y())
         self.cfg.save()
+        # 先 hide，再摘掉任务栏按钮：Qt 的 hide() 不会移除按钮，
+        # 残留按钮被点击会把窗口又拉出来（这就是「点不消失」的根因）。
         self.hide()
+        set_taskbar_visible(self, False)
         self.tray.showMessage(
             APP_NAME,
             f"已隐藏。按 {HOTKEY_PRESETS[int(self.cfg.get('hotkey_index', 0))][0]} 或点托盘图标恢复。",
-            self._make_icon(), 2200)
+            self._make_icon(), 1600)
 
     def show_window(self):
         self._hidden = False
+        set_taskbar_visible(self, True)    # 先把任务栏按钮加回来
         self.show()
+        if self.isMinimized():
+            self.showNormal()
         self.raise_()
         self.activateWindow()
+
+    def changeEvent(self, ev):
+        """窗口状态被外部改动时，把任务栏按钮拉回与可见性一致的状态。
+
+        不做「最小化就摘按钮」——最小化不是隐身，摘了用户就找不回来了。
+        """
+        super().changeEvent(ev)
+        if ev.type() == QEvent.Type.WindowStateChange:
+            if self.isVisible() and not self._hidden:
+                set_taskbar_visible(self, True)
 
     def _enable_capture_guard(self, on: bool):
         self._capture_guard_on = on
@@ -1059,11 +1186,14 @@ class GhostReader(FramelessWindow):
     def _check_capture(self):
         detected = detect_capture()
         if detected and self.isVisible():
-            self.hide()
+            # 走和手动隐藏同一套逻辑，别让 _hidden 与真实可见性失步
             self._hidden_by_guard = True
+            self._hidden = True
+            self.hide()
+            set_taskbar_visible(self, False)
         elif not detected and self._hidden_by_guard:
-            self.show()
             self._hidden_by_guard = False
+            self.show_window()
 
     # ===================================================== 拖拽 / 事件
 
@@ -1111,6 +1241,16 @@ class GhostReader(FramelessWindow):
     def eventFilter(self, obj, ev):
         try:
             t = ev.type()
+
+            # ---------- Esc 一键隐藏（应用级拦截）
+            # 原来挂在 QShortcut 上，焦点在侧栏输入框 / 正文 / 下拉里时会漏掉，
+            # 表现就是「按 Esc 有时候不消失」。这里在应用层拦，谁有焦点都收得到。
+            # 模态对话框（打开书籍、跳转章节、消息框）自己处理 Esc，不要抢。
+            if t == QEvent.Type.KeyPress and ev.key() == Qt.Key.Key_Escape:
+                if QApplication.activeModalWidget() is None:
+                    if self.isVisible() and not self.isMinimized():
+                        self.hide_window()
+                        return True
 
             # ---------- 全局鼠标：边缘缩放的唯一可靠入口
             # 内容区铺满窗口，边缘的鼠标事件会被 textBrowser 等子控件吃掉，
